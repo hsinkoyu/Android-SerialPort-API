@@ -165,3 +165,19 @@ JNIEXPORT void JNICALL Java_android_serialport_SerialPort_close
 	close(descriptor);
 }
 
+JNIEXPORT void JNICALL Java_android_serialport_SerialPort_flush
+        (JNIEnv *env, jobject thiz)
+{
+    jclass SerialPortClass = (*env)->GetObjectClass(env, thiz);
+    jclass FileDescriptorClass = (*env)->FindClass(env, "java/io/FileDescriptor");
+
+    jfieldID mFdID = (*env)->GetFieldID(env, SerialPortClass, "mFd", "Ljava/io/FileDescriptor;");
+    jfieldID descriptorID = (*env)->GetFieldID(env, FileDescriptorClass, "descriptor", "I");
+
+    jobject mFd = (*env)->GetObjectField(env, thiz, mFdID);
+    jint descriptor = (*env)->GetIntField(env, mFd, descriptorID);
+
+    LOGD("flush(fd = %d)", descriptor);
+    /* flush both data received but not read, and data written but not transmitted */
+    tcflush(descriptor, TCIOFLUSH);
+}

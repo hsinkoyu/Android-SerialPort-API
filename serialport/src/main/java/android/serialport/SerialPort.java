@@ -46,8 +46,8 @@ public class SerialPort {
     }
 
     /*
-         * Do not remove or rename the field mFd: it is used by native method close();
-         */
+     * Do not remove or rename the field mFd: it is used by native method close();
+     */
     private FileDescriptor mFd;
     private FileInputStream mFileInputStream;
     private FileOutputStream mFileOutputStream;
@@ -106,6 +106,8 @@ public class SerialPort {
     private native static FileDescriptor open(String path, int baudrate, int flags);
 
     public native void close();
+
+    public native void flush();
 
     static {
         System.loadLibrary("serial_port");
