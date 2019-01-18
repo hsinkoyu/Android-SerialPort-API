@@ -54,6 +54,8 @@ public class SerialPortHandler extends SerialPort {
     /**
      * MSG_WHAT_WRITE_AND_READ - a kind of command/response pair
      *
+     * There will be a MSG_WHAT_RSP returning to clients.
+     *
      * This message is not expected to deliver between MSG_WHAT_READ and MSG_WHAT_READ_TERMINATION,
      * or the response is unpredictable.
      */
