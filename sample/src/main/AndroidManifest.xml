@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest package="android.serialport.sample"
-    xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="android.serialport.sample"
+    android:sharedUserId="android.uid.system">
 
     <application
         android:name=".Application"
@@ -16,10 +17,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name="SerialPortPreferences"></activity>
-        <activity android:name="ConsoleActivity"></activity>
-        <activity android:name="LoopbackActivity"></activity>
-        <activity android:name="Sending01010101Activity"></activity>
+        <activity android:name=".SerialPortPreferences" />
+        <activity android:name=".ConsoleActivity" />
+        <activity android:name=".LoopbackActivity" />
+        <activity android:name=".Sending01010101Activity" />
+        <activity
+            android:name=".BarcodeScannerActivity"
+            android:label="@string/title_activity_barcode_scanner">
+        </activity>
     </application>
 
 </manifest>

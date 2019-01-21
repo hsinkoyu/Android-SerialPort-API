@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+/**
+ * SOURCE CODE DEPENDENT
+ *
+ * EDIT THIS FILE ONLY IF YOU KNOW WHAT YOU DO
+ */
+-->
+<resources>
+
+    <array name="power_modes">
+        <!-- <item>(x) Idle (imager powered on)</item> -->
+        <!-- <item>(x) Idle (imager powered off)</item> -->
+        <item>(o) Standby</item>
+        <item>(x) Power Off</item>
+    </array>
+
+    <array name="trigger_modes">
+        <item>(o) Manual Trigger (Hardware Trigger)</item>
+        <item>(o) Serial Trigger (Software Trigger)</item>
+        <item>(x) Low Power Manual Trigger (Power Off Mode)</item>
+        <item>(o) Presentation Mode</item>
+        <item>(o) Streaming Presentation Mode</item>
+    </array>
+
+</resources>

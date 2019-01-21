@@ -31,6 +31,13 @@ public class MainMenu extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main);
 
+        final Button buttonBarcodeScanner = (Button) findViewById(R.id.ButtonBarcodeScanner);
+        buttonBarcodeScanner.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                startActivity(new Intent(MainMenu.this, BarcodeScannerActivity.class));
+            }
+        });
+
         final Button buttonSetup = (Button) findViewById(R.id.ButtonSetup);
         buttonSetup.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
