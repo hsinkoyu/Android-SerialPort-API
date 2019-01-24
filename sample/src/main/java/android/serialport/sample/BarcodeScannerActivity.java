@@ -52,6 +52,8 @@ public class BarcodeScannerActivity extends Activity {
     public static final String BCS_TTY_DEVICE = "/dev/ttyMSM1";
     public static final int BCS_TTY_BAUDRATE = 115200;
     public static final int BCS_POWERED_ON_INIT_TIME_MS = 1500;
+    /* The PWRDWN signal goes high ~1.2s after the wake up event occurs. */
+    public static final int BCS_WAKE_UP_TIME_MS = 1200;
 
     public static final int BCS_TRIGGER_MODE_MANUAL_TRIGGER = 0;
     public static final int BCS_TRIGGER_MODE_SERIAL_TRIGGER = 1;
@@ -63,12 +65,18 @@ public class BarcodeScannerActivity extends Activity {
     public static final int BCS_TTY_READ_BUFFER_SIZE = 512;
     public static final int READ_TIME_OUT_DEFAULT = 30;
 
+    /* local messages */
+    private static final int MSG_BASE = 0x1000;
+    private static final int MSG_PERFORM_SCANNING_ACTIVATION = MSG_BASE + 0;
+
     private static SerialPortHandler mBCS = null;
     private Handler mHandler; /* UI thread handler */
     private int mReadTimeOut = -1;
+    private int mLastTriggeredMode = -1;
     private TextView mBarcode;
     private ScanningDialog mScanningDlg;
     private WaitingDialog mInitializingDlg;
+    private WaitingDialog mWakeupDlg;
 
     /*
      * the default value for the settings for reference
@@ -84,6 +92,12 @@ public class BarcodeScannerActivity extends Activity {
      *
      * [MSG_WHAT_WRITE_AND_READ] -> [SYN]M[CR]232LPT*.
      * [MSG_WHAT_WRITE_AND_READ] <- 232LPT0-300[ACK].
+     *
+     * [MSG_WHAT_WRITE_AND_READ] -> [SYN]M[CR]TRGLPT?.
+     * [MSG_WHAT_WRITE_AND_READ] <- TRGLPT120[ACK].
+     *
+     * [MSG_WHAT_WRITE_AND_READ] -> [SYN]M[CR]TRGLPT*.
+     * [MSG_WHAT_WRITE_AND_READ] <- TRGLPT0-300[ACK].
      */
     private void postPoweredOn() {
         final int delayed = BCS_POWERED_ON_INIT_TIME_MS;
@@ -99,8 +113,16 @@ public class BarcodeScannerActivity extends Activity {
                 cmd);
         mBCS.getHandler().sendMessageDelayed(msg, delayed);
 
+        /*
+         * Power Off mode is entered when the menu command TRGLPT expires while in
+         * Manual Low Power Trigger mode (TRGMOD2).
+         *
+         * The default value for TRGLPT is 120 (seconds).
+         */
+
         /* reset the default value */
         mReadTimeOut = -1;
+        mLastTriggeredMode = -1;
     }
 
     private boolean isPowered() {
@@ -148,7 +170,6 @@ public class BarcodeScannerActivity extends Activity {
 
         /* wait for initialization */
         if (on) {
-            mInitializingDlg.setWaitTime(BCS_POWERED_ON_INIT_TIME_MS);
             mInitializingDlg.show();
             postPoweredOn();
         }
@@ -185,7 +206,7 @@ public class BarcodeScannerActivity extends Activity {
             @Override
             public void handleMessage(Message msg) {
                 switch (msg.what) {
-                    case SerialPortHandler.MSG_WHAT_READ_RESULT:
+                    case SerialPortHandler.MSG_WHAT_READ_RESULT: {
                         String barcode = new String((byte[]) msg.obj);
                         if (!mScanningDlg.isPresentationMode()) {
                             mScanningDlg.dismiss();
@@ -195,6 +216,15 @@ public class BarcodeScannerActivity extends Activity {
                         }
                         mBarcode.setText(barcode);
                         break;
+                    }
+                    case SerialPortHandler.MSG_WHAT_RSP: {
+                        Log.v(TAG, "TODO: handle SerialPortHandler.MSG_WHAT_RSP");
+                        break;
+                    }
+                    case MSG_PERFORM_SCANNING_ACTIVATION: {
+                        findViewById(R.id.activate).performClick();
+                        break;
+                    }
                     default:
                         break;
                 }
@@ -204,9 +234,11 @@ public class BarcodeScannerActivity extends Activity {
 
         mBarcode = findViewById(R.id.barcode);
         mScanningDlg = new ScanningDialog(this);
-        mInitializingDlg = new WaitingDialog(this);
-        ((Spinner)findViewById(R.id.power_mode)).setSelection(0);
-        ((Spinner)findViewById(R.id.trigger_mode)).setSelection(1);
+        mInitializingDlg = new WaitingDialog(this, "\nInitializing\n\nPlease wait...\n",
+                BCS_POWERED_ON_INIT_TIME_MS);
+        mWakeupDlg = new WaitingDialog(this, "\nWaking up from power off mode\n\nPlease wait...\n",
+                BCS_WAKE_UP_TIME_MS);
+        ((Spinner)findViewById(R.id.trigger_mode)).setSelection(BCS_TRIGGER_MODE_SERIAL_TRIGGER);
 
         Switch power = findViewById(R.id.power_switch);
         power.setChecked(isPowered());
@@ -229,9 +261,9 @@ public class BarcodeScannerActivity extends Activity {
             @Override
             public void onClick(View v) {
                 Spinner trigger_mode = findViewById(R.id.trigger_mode);
-                boolean isStandby = false;
+                boolean isPowerDown = false;
 
-                /* is in standby mode */
+                /* is in standby or in power off mode */
                 try {
                     FileInputStream signals = new FileInputStream("/sys/devices/soc/soc:n668x_db_platform/signals");
                     try {
@@ -242,7 +274,7 @@ public class BarcodeScannerActivity extends Activity {
                             int x = s.indexOf("nPWRDWN=");
                             if (x != -1) {
                                 if (s.charAt(x + 8) == '0')
-                                    isStandby = true;
+                                    isPowerDown = true;
                             }
                         }
                     } catch (IOException e) {
@@ -253,22 +285,56 @@ public class BarcodeScannerActivity extends Activity {
                     e.printStackTrace();
                 }
 
-                /* exit standby mode */
-                if (isStandby) {
-                    try {
-                        FileOutputStream signals = new FileOutputStream("/sys/devices/soc/soc:n668x_db_platform/signals");
+                if (isPowerDown) {
+                    if (mLastTriggeredMode == BCS_TRIGGER_MODE_LOW_POWER_MANUAL_TRIGGER) {
+                        /* power off mode*/
+                        mWakeupDlg.show();
+                        Thread trigger = new Thread(new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    FileOutputStream signals = new FileOutputStream("/sys/devices/soc/soc:n668x_db_platform/signals");
+                                    try {
+                                        signals.write("nTRIG=0".getBytes("US-ASCII"));
+                                        Thread.sleep(BCS_WAKE_UP_TIME_MS);
+                                        signals.write("nTRIG=1".getBytes("US-ASCII"));
+                                        Log.v(TAG, "exit power off mode");
+                                    } catch (InterruptedException e) {
+                                        e.printStackTrace();
+                                    }
+                                    signals.close();
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                }
+                            }
+                        });
+                        trigger.start();
+                        /* UI thread sleeps for a while to let trigger thread run */
                         try {
-                            signals.write("nTRIG=0".getBytes("US-ASCII"));
-                            /* 1.1 milliseconds defined in device specification */
-                            Thread.sleep(2);
-                            signals.write("nTRIG=1".getBytes("US-ASCII"));
-                            Log.v(TAG, "exit standby mode");
+                            Thread.sleep(20);
                         } catch (InterruptedException e) {
                             e.printStackTrace();
                         }
-                        signals.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
+                        Message msg = mHandler.obtainMessage(MSG_PERFORM_SCANNING_ACTIVATION);
+                        mHandler.sendMessageDelayed(msg, BCS_WAKE_UP_TIME_MS);
+                        return;
+                    } else {
+                        /* standby mode */
+                        try {
+                            FileOutputStream signals = new FileOutputStream("/sys/devices/soc/soc:n668x_db_platform/signals");
+                            try {
+                                signals.write("nTRIG=0".getBytes("US-ASCII"));
+                                /* 1.1 milliseconds defined in device specification */
+                                Thread.sleep(2);
+                                signals.write("nTRIG=1".getBytes("US-ASCII"));
+                                Log.v(TAG, "exit standby mode");
+                            } catch (InterruptedException e) {
+                                e.printStackTrace();
+                            }
+                            signals.close();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
                     }
                 }
 
@@ -301,6 +367,18 @@ public class BarcodeScannerActivity extends Activity {
                             mBCS.getHandler().sendMessage(msg);
 
                             mReadTimeOut = val;
+                        }
+
+                        if (mLastTriggeredMode == BCS_TRIGGER_MODE_LOW_POWER_MANUAL_TRIGGER) {
+                            byte[] cmd = new byte[] {0x16, 'M', 0x0d, 'T', 'R', 'G', 'M', 'O', 'D', '0', '!'};
+                            Message msg = mBCS.getHandler().obtainMessage(
+                                    SerialPortHandler.MSG_WHAT_WRITE_AND_READ,
+                                    SerialPortHandler.MSG_ARG1_NO_RSP_TO_SENDER,
+                                    SerialPortHandler.MSG_ARG2_UNUSED,
+                                    cmd);
+                            mBCS.getHandler().sendMessage(msg);
+                        } else {
+                            /* the other four trigger modes were finally in TRGMOD0 */
                         }
 
                         /* start reader thread prior to scanning */
@@ -354,6 +432,18 @@ public class BarcodeScannerActivity extends Activity {
                             mReadTimeOut = val;
                         }
 
+                        if (mLastTriggeredMode == BCS_TRIGGER_MODE_LOW_POWER_MANUAL_TRIGGER) {
+                            byte[] cmd = new byte[] {0x16, 'M', 0x0d, 'T', 'R', 'G', 'M', 'O', 'D', '0', '!'};
+                            Message msg = mBCS.getHandler().obtainMessage(
+                                    SerialPortHandler.MSG_WHAT_WRITE_AND_READ,
+                                    SerialPortHandler.MSG_ARG1_NO_RSP_TO_SENDER,
+                                    SerialPortHandler.MSG_ARG2_UNUSED,
+                                    cmd);
+                            mBCS.getHandler().sendMessage(msg);
+                        } else {
+                            /* the other four trigger modes were finally in TRGMOD0 */
+                        }
+
                         /* start reader thread prior to scanning */
                         mScanningDlg.setTimeout(mReadTimeOut * 1000);
                         mScanningDlg.setTriggeredMode(BCS_TRIGGER_MODE_SERIAL_TRIGGER);
@@ -372,6 +462,64 @@ public class BarcodeScannerActivity extends Activity {
                         break;
                     }
                     case BCS_TRIGGER_MODE_LOW_POWER_MANUAL_TRIGGER: {
+                        EditText timeout = findViewById(R.id.read_time_out);
+                        int val = Integer.parseInt(timeout.getText().toString());
+
+                        if (mReadTimeOut != val) {
+                            byte[] prefix = new byte[] {0x16, 'M', 0x0d, 'T', 'R', 'G', 'S', 'T', 'O'};
+                            byte[] data;
+                            byte[] storage = new byte[] {'!'};
+                            try {
+                                String timeout_ms = timeout.getText().toString() + "000";
+                                data = timeout_ms.getBytes("US-ASCII");
+                            } catch (UnsupportedEncodingException e) {
+                                e.printStackTrace();
+                                return;
+                            }
+                            byte[] cmd = new byte[prefix.length + data.length + storage.length];
+                            System.arraycopy(prefix, 0, cmd, 0, prefix.length);
+                            System.arraycopy(data, 0, cmd, prefix.length, data.length);
+                            System.arraycopy(storage, 0, cmd, prefix.length + data.length, storage.length);
+
+                            Message msg = mBCS.getHandler().obtainMessage(
+                                    SerialPortHandler.MSG_WHAT_WRITE_AND_READ,
+                                    SerialPortHandler.MSG_ARG1_NO_RSP_TO_SENDER,
+                                    SerialPortHandler.MSG_ARG2_UNUSED,
+                                    cmd);
+                            mBCS.getHandler().sendMessage(msg);
+
+                            mReadTimeOut = val;
+                        }
+
+                        if (mLastTriggeredMode != BCS_TRIGGER_MODE_LOW_POWER_MANUAL_TRIGGER) {
+                            byte[] cmd = new byte[] {0x16, 'M', 0x0d, 'T', 'R', 'G', 'M', 'O', 'D', '2', '!'};
+                            Message msg = mBCS.getHandler().obtainMessage(
+                                    SerialPortHandler.MSG_WHAT_WRITE_AND_READ,
+                                    SerialPortHandler.MSG_ARG1_NO_RSP_TO_SENDER,
+                                    SerialPortHandler.MSG_ARG2_UNUSED,
+                                    cmd);
+                            mBCS.getHandler().sendMessage(msg);
+                        }
+
+                        /* start reader thread prior to scanning */
+                        mScanningDlg.setTimeout(mReadTimeOut * 1000);
+                        mScanningDlg.setTriggeredMode(BCS_TRIGGER_MODE_LOW_POWER_MANUAL_TRIGGER);
+                        mBarcode.setText("");
+                        mScanningDlg.show();
+
+                        /* an active low signal from the nTRIG pin of the host interface connector */
+                        try {
+                            FileOutputStream signals = new FileOutputStream("/sys/devices/soc/soc:n668x_db_platform/signals");
+                            try {
+                                signals.write("nTRIG=0".getBytes("US-ASCII"));
+                            } catch (UnsupportedEncodingException e) {
+                                e.printStackTrace();
+                            }
+                            signals.close();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+
                         break;
                     }
                     case BCS_TRIGGER_MODE_PRESENTATION_MODE: {
@@ -415,6 +563,8 @@ public class BarcodeScannerActivity extends Activity {
                     default:
                         break;
                 }
+
+                mLastTriggeredMode = trigger_mode.getSelectedItemPosition();
             }
         });
     }
@@ -458,7 +608,6 @@ public class BarcodeScannerActivity extends Activity {
         private int mTimeout = READ_TIME_OUT_DEFAULT * 1000;
         private int mTriggeredMode;
         private int mPresentationScannedCount;
-        private boolean mIsShown = false;
 
         private ScanningDialog(Context thiz) {
             super(thiz);
@@ -490,8 +639,10 @@ public class BarcodeScannerActivity extends Activity {
                             mBCS.getHandler().sendMessage(msg);
                             break;
                         }
-                        case BCS_TRIGGER_MODE_LOW_POWER_MANUAL_TRIGGER:
+                        case BCS_TRIGGER_MODE_LOW_POWER_MANUAL_TRIGGER: {
+                            /* what to do has already been done on dismiss() */
                             break;
+                        }
                         case BCS_TRIGGER_MODE_PRESENTATION_MODE:
                         case BCS_TRIGGER_MODE_STREAMING_PRESENTATION_MODE: {
                             /*
@@ -554,13 +705,9 @@ public class BarcodeScannerActivity extends Activity {
                     mTriggeredMode == BCS_TRIGGER_MODE_STREAMING_PRESENTATION_MODE;
         }
 
-        public boolean isShown() {
-            return mIsShown;
-        }
-
         public void show() {
             Log.v(TAG, "show()");
-            if (!mIsShown) {
+            if (!isShowing()) {
                 /* messaging stuff fist */
                 Message msg = mBCS.getHandler().obtainMessage(SerialPortHandler.MSG_WHAT_READ);
                 mBCS.getHandler().sendMessage(msg);
@@ -573,15 +720,15 @@ public class BarcodeScannerActivity extends Activity {
                 } else {
                     mCountDown.setVisibility(View.GONE);
                 }
-                mIsShown = true;
                 Log.v(TAG, "showed");
             }
         }
 
         public void dismiss() {
             Log.v(TAG, "dismiss()");
-            if (mIsShown) {
-                if (mTriggeredMode == BCS_TRIGGER_MODE_MANUAL_TRIGGER) {
+            if (isShowing()) {
+                if (mTriggeredMode == BCS_TRIGGER_MODE_MANUAL_TRIGGER ||
+                        mTriggeredMode == BCS_TRIGGER_MODE_LOW_POWER_MANUAL_TRIGGER) {
                     /* when get scanned, cancelled or timeout, we have to manually restore the nTRIG pin */
                     try {
                         FileOutputStream signals = new FileOutputStream("/sys/devices/soc/soc:n668x_db_platform/signals");
@@ -603,7 +750,6 @@ public class BarcodeScannerActivity extends Activity {
                 /* UI stuff */
                 super.dismiss();
                 mTimer.cancel();
-                mIsShown = false;
                 Log.v(TAG, "dismissed");
             }
         }
@@ -613,17 +759,23 @@ public class BarcodeScannerActivity extends Activity {
         private static final String TAG = "WaitingDialog";
 
         private final View mLayout = getLayoutInflater().inflate(R.layout.dialog_waiting, null);
+        private TextView mWaitText = mLayout.findViewById(R.id.please_wait);
         private int mWaitTime = 1000;
-        private boolean mIsShown = false;
 
-        public WaitingDialog(Context thiz) {
+        public WaitingDialog(Context thiz, String waitText, int waitMS) {
             super(thiz);
+            mWaitText.setText(waitText);
+            mWaitTime = waitMS;
             setView(mLayout);
             setCancelable(false);
         }
 
-        public void setWaitTime(int wait_ms) {
-            mWaitTime = wait_ms;
+        public void setWaitTime(int waitMS) {
+            mWaitTime = waitMS;
+        }
+
+        public void setWaitText(String waitText) {
+            mWaitText.setText(waitText);
         }
 
         public void show() {
@@ -636,17 +788,11 @@ public class BarcodeScannerActivity extends Activity {
                 @Override
                 public void onFinish() { dismiss(); }
             }.start();
-            mIsShown = true;
         }
 
         public void dismiss()
         {
             super.dismiss();
-            mIsShown = false;
-        }
-
-        public boolean isShown() {
-            return mIsShown;
         }
     }
 

@@ -20,13 +20,13 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:text="Power Mode:" />
+                android:text="Trigger Mode:" />
 
             <Spinner
-                android:id="@+id/power_mode"
+                android:id="@+id/trigger_mode"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:entries="@array/power_modes" />
+                android:entries="@array/trigger_modes" />
 
         </LinearLayout>
 
@@ -46,19 +46,6 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
-        android:text="Trigger Mode:" />
-
-    <Spinner
-        android:id="@+id/trigger_mode"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:entries="@array/trigger_modes" />
-
-    <TextView
-        android:id="@+id/textView3"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
         android:text="Read Time-Out for Serial Trigger Mode (0-300 sec.):" />
 
     <LinearLayout
@@ -75,7 +62,7 @@
             android:inputType="number" />
 
         <TextView
-            android:id="@+id/textView4"
+            android:id="@+id/textView3"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
