@@ -86,4 +86,27 @@
         android:layout_weight="1"
         android:gravity="center" />
 
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start"
+        android:orientation="horizontal">
+
+        <EditText
+            android:id="@+id/cmd_text"
+            android:layout_width="280dp"
+            android:layout_height="wrap_content"
+            android:gravity="start"
+            android:inputType="text" />
+
+        <Button
+            android:id="@+id/cmd_send"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="2dp"
+            android:layout_marginStart="2dp"
+            android:text="Send CMD" />
+
+    </LinearLayout>
+
 </LinearLayout>

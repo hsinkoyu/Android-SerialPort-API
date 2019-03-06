@@ -78,6 +78,29 @@ public class BarcodeScannerActivity extends Activity {
     private WaitingDialog mInitializingDlg;
     private WaitingDialog mWakeupDlg;
 
+    private String byteArrayToPrintableString(byte[] array, int length) {
+        StringBuilder sb = new StringBuilder();
+
+        if (array != null) {
+            if (length > array.length)
+                length = array.length;
+            for (int i = 0; i < length; i++) {
+                if (array[i] >= 0 && array[i] <= 0x1f) {
+                    /* nonprintable characters */
+                    final String[] chars = new String[] {"NUL", "SOH", "STX", "ETX", "EOT", "ENQ",
+                            "ACK", "BEL", "BS", "TAB", "LF", "VT", "FF", "CR", "SO", "SI", "DLE",
+                            "DC1", "DC2", "DC3", "DC4", "NAK", "SYN", "ETB", "CAN", "EM", "SUB",
+                            "ESC", "FS", "GS", "RS", "US"};
+                    sb.append("[" + chars[array[i]] + "]");
+                } else {
+                    sb.append((char)array[i]);
+                }
+            }
+        }
+
+        return sb.toString();
+    }
+
     /*
      * the default value for the settings for reference
      *
@@ -117,7 +140,7 @@ public class BarcodeScannerActivity extends Activity {
          * Power Off mode is entered when the menu command TRGLPT expires while in
          * Manual Low Power Trigger mode (TRGMOD2).
          */
-        cmd = new byte[] {0x16, 'M', 0x0d, 'T', 'R', 'G', 'L', 'P', 'T', '1', '!'};
+        cmd = new byte[] {0x16, 'M', 0x0d, 'T', 'R', 'G', 'L', 'P', 'T', '3', '0', '!'};
         msg = mBCS.getHandler().obtainMessage(
                 SerialPortHandler.MSG_WHAT_WRITE_AND_READ,
                 SerialPortHandler.MSG_ARG1_NO_RSP_TO_SENDER,
@@ -212,7 +235,7 @@ public class BarcodeScannerActivity extends Activity {
             public void handleMessage(Message msg) {
                 switch (msg.what) {
                     case SerialPortHandler.MSG_WHAT_READ_RESULT: {
-                        String barcode = new String((byte[]) msg.obj);
+                        String barcode = new String((byte[])msg.obj);
                         if (!mScanningDlg.isPresentationMode()) {
                             mScanningDlg.dismiss();
                         } else {
@@ -223,7 +246,8 @@ public class BarcodeScannerActivity extends Activity {
                         break;
                     }
                     case SerialPortHandler.MSG_WHAT_RSP: {
-                        Log.v(TAG, "TODO: handle SerialPortHandler.MSG_WHAT_RSP");
+                        byte[] rsp = (byte[]) msg.obj;
+                        mBarcode.setText(byteArrayToPrintableString(rsp, rsp.length));
                         break;
                     }
                     case MSG_PERFORM_SCANNING_ACTIVATION: {
@@ -252,6 +276,7 @@ public class BarcodeScannerActivity extends Activity {
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                 switchPower(isChecked);
                 findViewById(R.id.activate).setEnabled(isChecked);
+                findViewById(R.id.cmd_send).setEnabled(isChecked);
             }
         });
 
@@ -570,6 +595,63 @@ public class BarcodeScannerActivity extends Activity {
                 }
 
                 mLastTriggeredMode = trigger_mode.getSelectedItemPosition();
+            }
+        });
+
+        Button send = findViewById(R.id.cmd_send);
+        send.setEnabled(isPowered());
+        send.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                int i, j;
+                CharSequence t = ((EditText)findViewById(R.id.cmd_text)).getText();
+                char[] text = new char[t.length()];
+                char c, c1, c2, c3;
+                int y1, y2;
+                for (i = 0, j = 0; i < t.length(); i++, j++) {
+                    c = t.charAt(i);
+                    if (c == '\\') {
+                        if ((i + 3) < t.length()) {
+                            c1 = t.charAt(i + 1);
+                            c2 = t.charAt(i + 2);
+                            c3 = t.charAt(i + 3);
+                            if ((c1 == 'x') &&
+                                    ((c2 >= '0' && c2 <= '9') ||
+                                            (c2 >= 'a' && c2 <= 'f') ||
+                                            (c2 >= 'A' && c2 <= 'F')) &&
+                                    ((c3 >= '0' && c3 <= '9') ||
+                                            (c3 >= 'a' && c3 <= 'f') ||
+                                            (c3 >= 'A' && c3 <= 'F'))) {
+                                if (c2 >= 'a')
+                                    y1 = c2 - 'a' + 10;
+                                else if (c2 >= 'A')
+                                    y1 = c2 - 'A' + 10;
+                                else
+                                    y1 = c2 - '0';
+
+                                if (c3 >= 'a')
+                                    y2 = c3 - 'a' + 10;
+                                else if (c3 >= 'A')
+                                    y2 = c3 - 'A' + 10;
+                                else
+                                    y2 = c3 - '0';
+                                c = (char) (y1 * 16 + y2);
+                                i += 3;
+                            }
+                        }
+                    }
+                    text[j] = c;
+                }
+
+                byte[] cmd = new String(text, 0, j).getBytes();
+                Message msg = mBCS.getHandler().obtainMessage(
+                        SerialPortHandler.MSG_WHAT_WRITE_AND_READ,
+                        SerialPortHandler.MSG_ARG1_RSP_TO_SENDER,
+                        SerialPortHandler.MSG_ARG2_UNUSED,
+                        cmd);
+                mBCS.getHandler().sendMessage(msg);
+
+                mBarcode.setText("");
             }
         });
     }
