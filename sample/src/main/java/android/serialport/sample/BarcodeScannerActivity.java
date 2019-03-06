@@ -140,7 +140,7 @@ public class BarcodeScannerActivity extends Activity {
          * Power Off mode is entered when the menu command TRGLPT expires while in
          * Manual Low Power Trigger mode (TRGMOD2).
          */
-        cmd = new byte[] {0x16, 'M', 0x0d, 'T', 'R', 'G', 'L', 'P', 'T', '3', '0', '!'};
+        cmd = new byte[] {0x16, 'M', 0x0d, 'T', 'R', 'G', 'L', 'P', 'T', '1', '!'};
         msg = mBCS.getHandler().obtainMessage(
                 SerialPortHandler.MSG_WHAT_WRITE_AND_READ,
                 SerialPortHandler.MSG_ARG1_NO_RSP_TO_SENDER,
@@ -246,7 +246,7 @@ public class BarcodeScannerActivity extends Activity {
                         break;
                     }
                     case SerialPortHandler.MSG_WHAT_RSP: {
-                        byte[] rsp = (byte[]) msg.obj;
+                        byte[] rsp = (byte[])msg.obj;
                         mBarcode.setText(byteArrayToPrintableString(rsp, rsp.length));
                         break;
                     }
